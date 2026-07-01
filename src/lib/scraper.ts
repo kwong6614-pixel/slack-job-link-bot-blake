@@ -14,9 +14,13 @@ import {
 } from "./greenhouse";
 import { fetchAdpJob, isAdpUrl } from "./adp";
 import { fetchAshbyJob, isAshbyUrl } from "./ashby";
+import { fetchBairesdevJob, isBairesdevUrl } from "./bairesdev";
 import { fetchBullhornJob, isBullhornUrl } from "./bullhorn";
 import { fetchDoverJob, fetchHtml, parseDoverJobId } from "./fetch-page";
+import { fetchGemJob, isGemUrl } from "./gem";
 import { fetchHibobJob, isHibobUrl } from "./hibob";
+import { fetchIcimsJob, isIcimsUrl } from "./icims";
+import { fetchJobdivaJob, isJobdivaUrl } from "./jobdiva";
 import { fetchUltiproJob, isUltiproUrl } from "./ultipro";
 
 export interface ScrapeResult {
@@ -270,13 +274,48 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
       }
     }
 
+    if (!text && isJobdivaUrl(normalizedUrl)) {
+      const jobdivaText = await fetchJobdivaJob(normalizedUrl);
+      if (jobdivaText) {
+        text = jobdivaText;
+        structured = true;
+      }
+    }
+
+    if (!text && isGemUrl(normalizedUrl)) {
+      const gemText = await fetchGemJob(normalizedUrl);
+      if (gemText) {
+        text = gemText;
+        structured = true;
+      }
+    }
+
+    if (!text && isBairesdevUrl(normalizedUrl)) {
+      const bairesdevText = await fetchBairesdevJob(normalizedUrl);
+      if (bairesdevText) {
+        text = bairesdevText;
+        structured = true;
+      }
+    }
+
+    if (!text && isIcimsUrl(normalizedUrl)) {
+      const icimsText = await fetchIcimsJob(normalizedUrl);
+      if (icimsText) {
+        text = icimsText;
+        structured = true;
+      }
+    }
+
     if (!text) {
       const html = await fetchHtml(normalizedUrl);
       if (!html) {
+        const icimsBlocked = isIcimsUrl(normalizedUrl);
         return {
           text: "",
           partial: false,
-          error: "Failed to fetch page",
+          error: icimsBlocked
+            ? "iCIMS blocked this request (AWS WAF captcha — cannot scrape server-side)"
+            : "Failed to fetch page",
         };
       }
 
