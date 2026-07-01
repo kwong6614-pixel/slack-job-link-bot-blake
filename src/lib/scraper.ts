@@ -4,6 +4,7 @@ import {
   fetchGreenhouseJobViaApi,
   findGreenhouseJobByTitle,
   isGreenhouseUrl,
+  normalizeIncomingUrl,
   parseGreenhouseUrl,
   parseJobTitleFromPageTitle,
 } from "./greenhouse";
@@ -219,13 +220,14 @@ function extractTextFromHtml(html: string, url: string): string {
 }
 
 async function scrapeGreenhouse(url: string): Promise<string | null> {
-  const ids = parseGreenhouseUrl(url);
+  const normalizedUrl = normalizeIncomingUrl(url);
+  const ids = parseGreenhouseUrl(normalizedUrl);
   if (ids) {
     const apiText = await fetchGreenhouseJobViaApi(ids.board, ids.jobId);
     if (apiText) return apiText;
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(normalizedUrl, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml",
@@ -242,8 +244,8 @@ async function scrapeGreenhouse(url: string): Promise<string | null> {
 
   const jobTitle = parseJobTitleFromPageTitle(pageTitle);
   const board =
-    parseGreenhouseUrl(url)?.board ||
-    new URL(url).searchParams.get("for") ||
+    parseGreenhouseUrl(normalizedUrl)?.board ||
+    new URL(normalizedUrl).searchParams.get("for") ||
     null;
 
   if (board && jobTitle) {
@@ -275,20 +277,21 @@ async function fetchPageText(url: string): Promise<{ html: string; text: string 
 
 export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
   try {
+    const normalizedUrl = normalizeIncomingUrl(url);
     let text = "";
 
-    if (isGreenhouseUrl(url)) {
-      const greenhouseText = await scrapeGreenhouse(url);
+    if (isGreenhouseUrl(normalizedUrl)) {
+      const greenhouseText = await scrapeGreenhouse(normalizedUrl);
       if (greenhouseText) text = greenhouseText;
     }
 
-    if (!text && isAshbyUrl(url)) {
-      const ashbyText = await fetchAshbyJob(url);
+    if (!text && isAshbyUrl(normalizedUrl)) {
+      const ashbyText = await fetchAshbyJob(normalizedUrl);
       if (ashbyText) text = ashbyText;
     }
 
     if (!text) {
-      const page = await fetchPageText(url);
+      const page = await fetchPageText(normalizedUrl);
       if (!page) {
         return {
           text: "",
@@ -308,7 +311,7 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
       };
     }
 
-    const pageCheck = looksLikeJobPage(url, text);
+    const pageCheck = looksLikeJobPage(normalizedUrl, text);
     if (!pageCheck.ok) {
       return {
         text,
@@ -329,9 +332,15 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
 }
 
 export function extractUrls(text: string): string[] {
-  const urlRegex = /https?:\/\/[^\s<>()]+/gi;
-  const matches = text.match(urlRegex) ?? [];
-  const cleaned = matches.map((u) => u.replace(/[>,)\].]+$/, ""));
+  const urls: string[] = [];
 
-  return [...new Set(cleaned)];
+  for (const match of text.matchAll(/<(https?:\/\/[^>]+)>/gi)) {
+    urls.push(normalizeIncomingUrl(match[1]));
+  }
+
+  for (const match of text.matchAll(/https?:\/\/[^\s<>()]+/gi)) {
+    urls.push(normalizeIncomingUrl(match[0]));
+  }
+
+  return [...new Set(urls)];
 }

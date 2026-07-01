@@ -5,9 +5,22 @@ export interface GreenhouseJobIds {
   jobId: string;
 }
 
+export function normalizeIncomingUrl(url: string): string {
+  let cleaned = url.trim().replace(/&amp;/gi, "&");
+
+  // Slack wraps links as <url|label> — strip the label suffix if present.
+  const schemeEnd = cleaned.indexOf("://");
+  const pipeIndex = cleaned.indexOf("|");
+  if (pipeIndex > -1 && pipeIndex > schemeEnd) {
+    cleaned = cleaned.slice(0, pipeIndex);
+  }
+
+  return cleaned.replace(/[>,)\].]+$/, "");
+}
+
 export function parseGreenhouseUrl(url: string): GreenhouseJobIds | null {
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(normalizeIncomingUrl(url));
 
     const pathMatch = parsed.pathname.match(/\/([^/]+)\/jobs\/(\d+)\/?$/);
     if (pathMatch) {
@@ -15,13 +28,14 @@ export function parseGreenhouseUrl(url: string): GreenhouseJobIds | null {
     }
 
     const board = parsed.searchParams.get("for");
-    const token = parsed.searchParams.get("token");
-    if (board && token && /^\d+$/.test(token)) {
+    const rawToken = parsed.searchParams.get("token");
+    const token = rawToken?.match(/^(\d+)/)?.[1];
+    if (board && token) {
       return { board, jobId: token };
     }
 
-    const ghJid = parsed.searchParams.get("gh_jid");
-    if (board && ghJid && /^\d+$/.test(ghJid)) {
+    const ghJid = parsed.searchParams.get("gh_jid")?.match(/^(\d+)/)?.[1];
+    if (board && ghJid) {
       return { board, jobId: ghJid };
     }
   } catch {

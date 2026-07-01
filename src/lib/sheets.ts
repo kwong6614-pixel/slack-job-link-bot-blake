@@ -1,4 +1,5 @@
 import { google, sheets_v4 } from "googleapis";
+import { normalizeIncomingUrl } from "./greenhouse";
 import {
   ACCEPTED_HEADERS,
   FAILED_HEADERS,
@@ -39,16 +40,16 @@ function normalizeCompany(value: string): string {
 }
 
 function normalizeUrl(url: string): string {
-  const trimmed = url.trim();
+  const cleaned = normalizeIncomingUrl(url);
   try {
-    const parsed = new URL(trimmed);
+    const parsed = new URL(cleaned);
     parsed.hash = "";
     if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
       parsed.pathname = parsed.pathname.slice(0, -1);
     }
     return parsed.href.toLowerCase();
   } catch {
-    return trimmed.toLowerCase().replace(/\/$/, "");
+    return cleaned.toLowerCase().replace(/\/$/, "");
   }
 }
 
