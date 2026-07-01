@@ -1,4 +1,12 @@
 import * as cheerio from "cheerio";
+import {
+  extractMetaFromHtml,
+  fetchGreenhouseJobViaApi,
+  findGreenhouseJobByTitle,
+  isGreenhouseUrl,
+  parseGreenhouseUrl,
+  parseJobTitleFromPageTitle,
+} from "./greenhouse";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -21,6 +29,8 @@ function extractFromGreenhouse($: cheerio.CheerioAPI): string {
     ".job-post",
     ".job__description",
     "[data-qa='job-description']",
+    ".job__body",
+    ".job-post-content",
   ];
   for (const selector of selectors) {
     const text = normalizeWhitespace($(selector).text());
@@ -116,7 +126,7 @@ const JD_CONTENT_KEYWORDS = [
   "job description",
   "what you will do",
   "what you'll do",
-  "what you’ll do",
+  "what you'll do",
   "about the role",
   "about this role",
   "we are looking for",
@@ -173,11 +183,10 @@ function looksLikeJobPage(
     };
   }
 
-  // Borderline — allow OpenAI to decide via is_job_page
   return { ok: true };
 }
 
-function extractText(html: string, url: string): string {
+function extractTextFromHtml(html: string, url: string): string {
   const $ = cheerio.load(html);
   const ats = detectAts(url);
 
@@ -200,30 +209,89 @@ function extractText(html: string, url: string): string {
     text = extractGeneric(cheerio.load(html));
   }
 
+  const meta = extractMetaFromHtml(html);
+  if (meta && text.length < 800) {
+    text = [meta, text].filter(Boolean).join("\n\n");
+  }
+
   return text.slice(0, 30000);
+}
+
+async function scrapeGreenhouse(url: string): Promise<string | null> {
+  const ids = parseGreenhouseUrl(url);
+  if (ids) {
+    const apiText = await fetchGreenhouseJobViaApi(ids.board, ids.jobId);
+    if (apiText) return apiText;
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: "text/html,application/xhtml+xml",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(25000),
+  });
+
+  if (!response.ok) return null;
+
+  const html = await response.text();
+  const pageTitle =
+    cheerio.load(html)("title").text() || extractMetaFromHtml(html);
+
+  const jobTitle = parseJobTitleFromPageTitle(pageTitle);
+  const board =
+    parseGreenhouseUrl(url)?.board ||
+    new URL(url).searchParams.get("for") ||
+    null;
+
+  if (board && jobTitle) {
+    const match = await findGreenhouseJobByTitle(board, jobTitle);
+    if (match) {
+      const apiText = await fetchGreenhouseJobViaApi(match.board, match.jobId);
+      if (apiText) return apiText;
+    }
+  }
+
+  return extractTextFromHtml(html, url);
+}
+
+async function fetchPageText(url: string): Promise<{ html: string; text: string } | null> {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: "text/html,application/xhtml+xml",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(25000),
+  });
+
+  if (!response.ok) return null;
+
+  const html = await response.text();
+  return { html, text: extractTextFromHtml(html, url) };
 }
 
 export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
   try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(25000),
-    });
+    let text = "";
 
-    if (!response.ok) {
-      return {
-        text: "",
-        partial: false,
-        error: `HTTP ${response.status} ${response.statusText}`,
-      };
+    if (isGreenhouseUrl(url)) {
+      const greenhouseText = await scrapeGreenhouse(url);
+      if (greenhouseText) text = greenhouseText;
     }
 
-    const html = await response.text();
-    const text = extractText(html, url);
+    if (!text) {
+      const page = await fetchPageText(url);
+      if (!page) {
+        return {
+          text: "",
+          partial: false,
+          error: "Failed to fetch page",
+        };
+      }
+      text = page.text;
+    }
 
     if (!text || text.length < 50) {
       return {
@@ -257,7 +325,7 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
 export function extractUrls(text: string): string[] {
   const urlRegex = /https?:\/\/[^\s<>()]+/gi;
   const matches = text.match(urlRegex) ?? [];
-  const cleaned = matches.map((url) => url.replace(/[>,)\].]+$/, ""));
+  const cleaned = matches.map((u) => u.replace(/[>,)\].]+$/, ""));
 
   return [...new Set(cleaned)];
 }

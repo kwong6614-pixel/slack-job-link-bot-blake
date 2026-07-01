@@ -67,6 +67,7 @@ Reject if the role is in:
 • Banking.
 • Insurance.
 • Aerospace.
+• Cyber Security
 • Government / Public sector.
 • Defense / Military / Security clearance work.
 
@@ -81,11 +82,11 @@ Prefer and ACCEPT:
 
 ⚠️ EDGE CASE RULES
 • If ambiguity exists → assume ACCEPTED.
-• If hybrid + remote wording both appear → treat as hybrid → REJECTED.
+• If hybrid + remote wording both appear → treat as hybrid → ACCEPTED.
 • If "occasional office visit" exists → treat as remote → ACCEPTED.
-• If location is unclear → ACCEPT
-• If remote location is unclear (e.g., "New York, NY, Remote") → ACCEPT
-• If industry is unclear → assume acceptable unless clearly in restricted list.
+• If location is unclear → ACCEPTED
+• If remote location is unclear (e.g., "New York, NY, Remote") → ACCEPTED
+• If industry is unclear → assume ACCEPTED unless clearly in restricted list.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 EXTRACTION
