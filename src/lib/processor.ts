@@ -2,8 +2,9 @@ import { analyzeJobDescription } from "./openai-analyzer";
 import { scrapeJobDescription } from "./scraper";
 import {
   appendJobToSheets,
-  buildSheetIndex,
+  createSheetContext,
   isDuplicate,
+  type SheetContext,
 } from "./sheets";
 import { postMessage, getUserDisplayName } from "./slack";
 import { ensurePromptInDatabase } from "./prompt";
@@ -24,9 +25,8 @@ function formatSummary(job: ProcessedJob): string {
 
 async function processSingleUrl(
   url: string,
-  channel: string,
-  userId: string,
-  submittedBy: string
+  submittedBy: string,
+  sheetCtx: SheetContext
 ): Promise<ProcessedJob> {
   const scrape = await scrapeJobDescription(url);
 
@@ -47,10 +47,26 @@ async function processSingleUrl(
     };
   }
 
-  const { result, token_usage } = await analyzeJobDescription(url, scrape.text);
-  const sheetIndex = await buildSheetIndex();
+  const urlDup = isDuplicate(sheetCtx.index, url, "");
+  if (urlDup.duplicate) {
+    return {
+      url,
+      status: "Rejected",
+      company_name: "",
+      role_title: "",
+      tech_stack: "Extra",
+      responsibilities: "",
+      qualifications_required: "",
+      qualifications_preferred: "",
+      rejection_reason: urlDup.reason ?? "Duplicate URL",
+      token_usage: 0,
+      submitted_by: submittedBy,
+    };
+  }
 
-  const dup = isDuplicate(sheetIndex, url, result.company_name);
+  const { result, token_usage } = await analyzeJobDescription(url, scrape.text);
+
+  const dup = isDuplicate(sheetCtx.index, url, result.company_name);
   if (dup.duplicate) {
     return {
       url,
@@ -123,10 +139,12 @@ export async function processUrlsFromMessage(
     `Analyzing ${urls.length} URL${urls.length > 1 ? "s" : ""}…`
   );
 
+  const sheetCtx = await createSheetContext();
+
   for (const url of urls) {
     try {
-      const job = await processSingleUrl(url, channel, userId, submittedBy);
-      await appendJobToSheets(job);
+      const job = await processSingleUrl(url, submittedBy, sheetCtx);
+      await appendJobToSheets(sheetCtx, job);
       await postMessage(channel, formatSummary(job));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -143,7 +161,7 @@ export async function processUrlsFromMessage(
         token_usage: 0,
         submitted_by: submittedBy,
       };
-      await appendJobToSheets(failedJob);
+      await appendJobToSheets(sheetCtx, failedJob);
       await postMessage(channel, `*Failed* — <${url}|${url}>\nError: ${message}`);
     }
   }

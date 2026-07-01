@@ -10,6 +10,7 @@ import {
   type SheetTab,
   type TechStack,
 } from "./types";
+import { withSheetsRetry } from "./sheets-retry";
 
 function getAuthClient() {
   const oauth2Client = new google.auth.OAuth2(
@@ -42,83 +43,6 @@ function headersForTab(tab: SheetTab): readonly string[] {
   if (tab === SHEET_TABS.FAILED) return FAILED_HEADERS;
   if (tab === SHEET_TABS.REJECTED) return REJECTED_HEADERS;
   return ACCEPTED_HEADERS;
-}
-
-async function getExistingTabTitles(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string
-): Promise<Set<string>> {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId });
-  const titles = meta.data.sheets?.map((s) => s.properties?.title ?? "") ?? [];
-  return new Set(titles.filter(Boolean));
-}
-
-async function createMissingTabs(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string
-): Promise<void> {
-  const existing = await getExistingTabTitles(sheets, spreadsheetId);
-  const missing = ALL_SHEET_TABS.filter((tab) => !existing.has(tab));
-
-  if (missing.length === 0) return;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: missing.map((title) => ({
-        addSheet: { properties: { title } },
-      })),
-    },
-  });
-}
-
-async function ensureTabHeaders(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  tab: SheetTab
-): Promise<void> {
-  const headers = headersForTab(tab);
-  const range = `'${tab}'!A1:Z1`;
-
-  const existing = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range,
-  });
-
-  const firstRow = existing.data.values?.[0];
-  if (!firstRow || firstRow.length === 0) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${tab}'!A1`,
-      valueInputOption: "RAW",
-      requestBody: { values: [headers as unknown as string[]] },
-    });
-  }
-}
-
-export async function initializeSpreadsheet(): Promise<void> {
-  const sheets = getSheetsClient();
-  const spreadsheetId = getSpreadsheetId();
-
-  await createMissingTabs(sheets, spreadsheetId);
-
-  for (const tab of ALL_SHEET_TABS) {
-    await ensureTabHeaders(sheets, spreadsheetId, tab);
-  }
-}
-
-async function getLastRow(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  tab: SheetTab
-): Promise<number> {
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `'${tab}'!A:A`,
-  });
-
-  const values = response.data.values ?? [];
-  return Math.max(values.length, 1);
 }
 
 function formatDate(): string {
@@ -162,23 +86,6 @@ function jobToFailedRow(job: ProcessedJob): string[] {
   ];
 }
 
-async function appendRow(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  tab: SheetTab,
-  row: string[]
-): Promise<void> {
-  const lastRow = await getLastRow(sheets, spreadsheetId, tab);
-  const nextRow = lastRow + 1;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `'${tab}'!A${nextRow}`,
-    valueInputOption: "RAW",
-    requestBody: { values: [row] },
-  });
-}
-
 function techStackTab(stack: TechStack): SheetTab {
   switch (stack) {
     case "Full Stack":
@@ -194,91 +101,171 @@ function techStackTab(stack: TechStack): SheetTab {
   }
 }
 
-export async function appendJobToSheets(job: ProcessedJob): Promise<void> {
-  await initializeSpreadsheet();
+export interface SheetContext {
+  sheets: sheets_v4.Sheets;
+  spreadsheetId: string;
+  index: SheetIndex;
+}
 
+let initPromise: Promise<void> | null = null;
+
+async function ensureSpreadsheetReady(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string
+): Promise<void> {
+  if (initPromise) return initPromise;
+
+  initPromise = withSheetsRetry(async () => {
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets.properties.title",
+    });
+    const existing = new Set(
+      meta.data.sheets?.map((s) => s.properties?.title ?? "").filter(Boolean) ?? []
+    );
+
+    const missing = ALL_SHEET_TABS.filter((tab) => !existing.has(tab));
+    if (missing.length > 0) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: missing.map((title) => ({
+            addSheet: { properties: { title } },
+          })),
+        },
+      });
+    }
+
+    const headerRanges = ALL_SHEET_TABS.map((tab) => `'${tab}'!A1:J1`);
+    const headerResponse = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: headerRanges,
+    });
+
+    const updates: { range: string; values: string[][] }[] = [];
+    ALL_SHEET_TABS.forEach((tab, i) => {
+      const firstRow = headerResponse.data.valueRanges?.[i]?.values?.[0];
+      if (!firstRow || firstRow.length === 0) {
+        updates.push({
+          range: `'${tab}'!A1`,
+          values: [headersForTab(tab) as unknown as string[]],
+        });
+      }
+    });
+
+    if (updates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: updates,
+        },
+      });
+    }
+  });
+
+  try {
+    await initPromise;
+  } catch (error) {
+    initPromise = null;
+    throw error;
+  }
+}
+
+async function fetchSheetIndex(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string
+): Promise<SheetIndex> {
+  return withSheetsRetry(async () => {
+    const ranges = [
+      `'${SHEET_TABS.ALL_JOBS}'!B:B`,
+      `'${SHEET_TABS.ALL_JOBS}'!E:E`,
+      `'${SHEET_TABS.FAILED}'!B:B`,
+      `'${SHEET_TABS.REJECTED}'!E:E`,
+    ];
+
+    const response = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges,
+    });
+
+    const urls = new Set<string>();
+    const companies = new Set<string>();
+
+    const valueRanges = response.data.valueRanges ?? [];
+
+    const allJobsCompanies = valueRanges[0]?.values?.slice(1).flat() ?? [];
+    const allJobsUrls = valueRanges[1]?.values?.slice(1).flat() ?? [];
+    const failedUrls = valueRanges[2]?.values?.slice(1).flat() ?? [];
+    const rejectedUrls = valueRanges[3]?.values?.slice(1).flat() ?? [];
+
+    for (const value of [...allJobsUrls, ...failedUrls, ...rejectedUrls]) {
+      if (value) urls.add(normalize(String(value)));
+    }
+
+    for (const value of allJobsCompanies) {
+      if (value) companies.add(normalize(String(value)));
+    }
+
+    return { urls, companies };
+  });
+}
+
+export async function createSheetContext(): Promise<SheetContext> {
   const sheets = getSheetsClient();
   const spreadsheetId = getSpreadsheetId();
 
+  await ensureSpreadsheetReady(sheets, spreadsheetId);
+  const index = await fetchSheetIndex(sheets, spreadsheetId);
+
+  return { sheets, spreadsheetId, index };
+}
+
+export function addJobToIndex(index: SheetIndex, job: ProcessedJob): void {
+  if (job.url) {
+    index.urls.add(normalize(job.url));
+  }
+  if (job.status === "Accepted" && job.company_name) {
+    index.companies.add(normalize(job.company_name));
+  }
+}
+
+async function appendRow(
+  ctx: SheetContext,
+  tab: SheetTab,
+  row: string[]
+): Promise<void> {
+  await withSheetsRetry(() =>
+    ctx.sheets.spreadsheets.values.append({
+      spreadsheetId: ctx.spreadsheetId,
+      range: `'${tab}'!A:J`,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [row] },
+    })
+  );
+}
+
+export async function appendJobToSheets(
+  ctx: SheetContext,
+  job: ProcessedJob
+): Promise<void> {
   if (job.status === "Failed") {
-    await appendRow(sheets, spreadsheetId, SHEET_TABS.FAILED, jobToFailedRow(job));
+    await appendRow(ctx, SHEET_TABS.FAILED, jobToFailedRow(job));
+    addJobToIndex(ctx.index, job);
     return;
   }
 
   if (job.status === "Rejected") {
-    await appendRow(
-      sheets,
-      spreadsheetId,
-      SHEET_TABS.REJECTED,
-      jobToRejectedRow(job)
-    );
+    await appendRow(ctx, SHEET_TABS.REJECTED, jobToRejectedRow(job));
+    addJobToIndex(ctx.index, job);
     return;
   }
 
   const acceptedRow = jobToAcceptedRow(job);
-  await appendRow(sheets, spreadsheetId, SHEET_TABS.ALL_JOBS, acceptedRow);
-  await appendRow(sheets, spreadsheetId, techStackTab(job.tech_stack), acceptedRow);
-}
-
-async function readColumnValues(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  tab: SheetTab,
-  column: string
-): Promise<string[]> {
-  try {
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: `'${tab}'!${column}:${column}`,
-    });
-    const values = response.data.values ?? [];
-    return values.slice(1).flat().filter(Boolean).map(String);
-  } catch {
-    return [];
-  }
-}
-
-export async function buildSheetIndex(): Promise<SheetIndex> {
-  await initializeSpreadsheet();
-
-  const sheets = getSheetsClient();
-  const spreadsheetId = getSpreadsheetId();
-
-  const urlTabs: SheetTab[] = [
-    SHEET_TABS.ALL_JOBS,
-    SHEET_TABS.FULL_STACK,
-    SHEET_TABS.AI,
-    SHEET_TABS.QA,
-    SHEET_TABS.DEVOPS,
-    SHEET_TABS.EXTRA,
-    SHEET_TABS.FAILED,
-    SHEET_TABS.REJECTED,
-  ];
-
-  const companyTabs: SheetTab[] = [
-    SHEET_TABS.ALL_JOBS,
-    SHEET_TABS.FULL_STACK,
-    SHEET_TABS.AI,
-    SHEET_TABS.QA,
-    SHEET_TABS.DEVOPS,
-    SHEET_TABS.EXTRA,
-  ];
-
-  const urls = new Set<string>();
-  const companies = new Set<string>();
-
-  for (const tab of urlTabs) {
-    const urlColumn = tab === SHEET_TABS.FAILED ? "B" : "E";
-    const values = await readColumnValues(sheets, spreadsheetId, tab, urlColumn);
-    values.forEach((url) => urls.add(normalize(url)));
-  }
-
-  for (const tab of companyTabs) {
-    const values = await readColumnValues(sheets, spreadsheetId, tab, "B");
-    values.forEach((company) => companies.add(normalize(company)));
-  }
-
-  return { urls, companies };
+  await appendRow(ctx, SHEET_TABS.ALL_JOBS, acceptedRow);
+  await appendRow(ctx, techStackTab(job.tech_stack), acceptedRow);
+  addJobToIndex(ctx.index, job);
 }
 
 export function isDuplicate(
