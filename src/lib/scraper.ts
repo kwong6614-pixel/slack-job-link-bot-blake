@@ -7,6 +7,7 @@ import {
   parseGreenhouseUrl,
   parseJobTitleFromPageTitle,
 } from "./greenhouse";
+import { fetchAshbyJob, isAshbyUrl } from "./ashby";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -279,6 +280,11 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
     if (isGreenhouseUrl(url)) {
       const greenhouseText = await scrapeGreenhouse(url);
       if (greenhouseText) text = greenhouseText;
+    }
+
+    if (!text && isAshbyUrl(url)) {
+      const ashbyText = await fetchAshbyJob(url);
+      if (ashbyText) text = ashbyText;
     }
 
     if (!text) {
