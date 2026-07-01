@@ -97,7 +97,7 @@ Prefer and ACCEPT:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Always extract (best-effort when is_job_page is false):
-- company_name: employer name
+- company_name: employer name - make it simple but clean
 - role_title: job title
 - tech_stack: classify into exactly ONE of: "Full Stack", "AI", "QA", "DevOps", "Extra"
   • Full Stack: backend, frontend, full stack, mobile engineering roles
