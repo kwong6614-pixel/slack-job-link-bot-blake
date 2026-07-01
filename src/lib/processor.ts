@@ -3,7 +3,8 @@ import { scrapeJobDescription } from "./scraper";
 import {
   appendJobToSheets,
   createSheetContext,
-  isDuplicate,
+  isDuplicateCompany,
+  isDuplicateUrl,
   type SheetContext,
 } from "./sheets";
 import { postMessage, getUserDisplayName } from "./slack";
@@ -26,6 +27,29 @@ function formatSummary(job: ProcessedJob): string {
   ].filter(Boolean);
 
   return lines.join("\n");
+}
+
+function rejectedJob(
+  url: string,
+  submittedBy: string,
+  reason: string,
+  token_usage = 0,
+  extras?: Partial<ProcessedJob>
+): ProcessedJob {
+  return {
+    url,
+    status: "Rejected",
+    company_name: extras?.company_name ?? "",
+    role_title: extras?.role_title ?? "",
+    tech_stack: extras?.tech_stack ?? "Extra",
+    responsibilities: extras?.responsibilities ?? "",
+    qualifications_required: extras?.qualifications_required ?? "",
+    qualifications_preferred: extras?.qualifications_preferred ?? "",
+    rejection_reason: reason,
+    token_usage,
+    submitted_by: submittedBy,
+    scrape_note: extras?.scrape_note,
+  };
 }
 
 function failedJob(
@@ -55,6 +79,11 @@ async function processSingleUrl(
   submittedBy: string,
   sheetCtx: SheetContext
 ): Promise<ProcessedJob> {
+  const urlDup = isDuplicateUrl(sheetCtx.index, url);
+  if (urlDup.duplicate) {
+    return rejectedJob(url, submittedBy, urlDup.reason ?? "Duplicate URL");
+  }
+
   const scrape = await scrapeJobDescription(url);
 
   if (!scrape.text || scrape.notJobPage) {
@@ -63,23 +92,6 @@ async function processSingleUrl(
       submittedBy,
       scrape.error ?? "Could not find job description content"
     );
-  }
-
-  const urlDup = isDuplicate(sheetCtx.index, url, "");
-  if (urlDup.duplicate) {
-    return {
-      url,
-      status: "Rejected",
-      company_name: "",
-      role_title: "",
-      tech_stack: "Extra",
-      responsibilities: "",
-      qualifications_required: "",
-      qualifications_preferred: "",
-      rejection_reason: urlDup.reason ?? "Duplicate URL",
-      token_usage: 0,
-      submitted_by: submittedBy,
-    };
   }
 
   const { result, token_usage } = await analyzeJobDescription(url, scrape.text);
@@ -92,39 +104,41 @@ async function processSingleUrl(
     return failedJob(url, submittedBy, reason, token_usage);
   }
 
-  const dup = isDuplicate(sheetCtx.index, url, result.company_name);
-  if (dup.duplicate) {
-    return {
+  const companyDup = isDuplicateCompany(sheetCtx.index, result.company_name);
+  if (companyDup.duplicate) {
+    return rejectedJob(
       url,
-      status: "Rejected",
-      company_name: result.company_name,
-      role_title: result.role_title,
-      tech_stack: result.tech_stack,
-      responsibilities: result.responsibilities,
-      qualifications_required: result.qualifications_required,
-      qualifications_preferred: result.qualifications_preferred,
-      rejection_reason: dup.reason ?? "Duplicate",
+      submittedBy,
+      companyDup.reason ?? "Duplicate",
       token_usage,
-      submitted_by: submittedBy,
-      scrape_note: scrape.partial ? "Partial scrape — analyzed available text" : undefined,
-    };
+      {
+        company_name: result.company_name,
+        role_title: result.role_title,
+        tech_stack: result.tech_stack,
+        responsibilities: result.responsibilities,
+        qualifications_required: result.qualifications_required,
+        qualifications_preferred: result.qualifications_preferred,
+        scrape_note: scrape.partial ? "Partial scrape — analyzed available text" : undefined,
+      }
+    );
   }
 
   if (result.status === "REJECTED") {
-    return {
+    return rejectedJob(
       url,
-      status: "Rejected",
-      company_name: result.company_name,
-      role_title: result.role_title,
-      tech_stack: result.tech_stack,
-      responsibilities: result.responsibilities,
-      qualifications_required: result.qualifications_required,
-      qualifications_preferred: result.qualifications_preferred,
-      rejection_reason: result.rejection_reasons.join("; ") || "Rejected by analysis rules",
+      submittedBy,
+      result.rejection_reasons.join("; ") || "Rejected by analysis rules",
       token_usage,
-      submitted_by: submittedBy,
-      scrape_note: scrape.partial ? "Partial scrape — analyzed available text" : undefined,
-    };
+      {
+        company_name: result.company_name,
+        role_title: result.role_title,
+        tech_stack: result.tech_stack,
+        responsibilities: result.responsibilities,
+        qualifications_required: result.qualifications_required,
+        qualifications_preferred: result.qualifications_preferred,
+        scrape_note: scrape.partial ? "Partial scrape — analyzed available text" : undefined,
+      }
+    );
   }
 
   return {

@@ -34,8 +34,22 @@ function getSheetsClient(): sheets_v4.Sheets {
   return google.sheets({ version: "v4", auth: getAuthClient() });
 }
 
-function normalize(value: string): string {
+function normalizeCompany(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function normalizeUrl(url: string): string {
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = "";
+    if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
+      parsed.pathname = parsed.pathname.slice(0, -1);
+    }
+    return parsed.href.toLowerCase();
+  } catch {
+    return trimmed.toLowerCase().replace(/\/$/, "");
+  }
 }
 
 function headersForTab(tab: SheetTab): readonly string[] {
@@ -183,11 +197,11 @@ async function fetchSheetIndex(
     const failedUrls = valueRanges[2]?.values?.slice(1).flat() ?? [];
 
     for (const value of [...allJobsUrls, ...failedUrls]) {
-      if (value) urls.add(normalize(String(value)));
+      if (value) urls.add(normalizeUrl(String(value)));
     }
 
     for (const value of allJobsCompanies) {
-      if (value) companies.add(normalize(String(value)));
+      if (value) companies.add(normalizeCompany(String(value)));
     }
 
     return { urls, companies };
@@ -206,10 +220,10 @@ export async function createSheetContext(): Promise<SheetContext> {
 
 export function addJobToIndex(index: SheetIndex, job: ProcessedJob): void {
   if (job.url) {
-    index.urls.add(normalize(job.url));
+    index.urls.add(normalizeUrl(job.url));
   }
   if (job.status === "Accepted" && job.company_name) {
-    index.companies.add(normalize(job.company_name));
+    index.companies.add(normalizeCompany(job.company_name));
   }
 }
 
@@ -249,18 +263,22 @@ export async function appendJobToSheets(
   addJobToIndex(ctx.index, job);
 }
 
-export function isDuplicate(
+export function isDuplicateUrl(
   index: SheetIndex,
-  url: string,
-  companyName: string
+  url: string
 ): { duplicate: boolean; reason?: string } {
-  if (index.urls.has(normalize(url))) {
+  if (index.urls.has(normalizeUrl(url))) {
     return { duplicate: true, reason: "Duplicate URL" };
   }
+  return { duplicate: false };
+}
 
-  if (companyName && index.companies.has(normalize(companyName))) {
+export function isDuplicateCompany(
+  index: SheetIndex,
+  companyName: string
+): { duplicate: boolean; reason?: string } {
+  if (companyName && index.companies.has(normalizeCompany(companyName))) {
     return { duplicate: true, reason: "Duplicate company (one role per company)" };
   }
-
   return { duplicate: false };
 }
