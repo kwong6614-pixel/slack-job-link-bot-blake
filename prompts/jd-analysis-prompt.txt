@@ -49,7 +49,8 @@ Prefer and ACCEPT:
 • If ambiguity exists → assume ACCEPTED.
 • If hybrid + remote wording both appear → treat as hybrid → REJECTED.
 • If "occasional office visit" exists → treat as remote → ACCEPTED.
-• If location is unclear → ACCEPT only when salary range is given and over 80K annually. REJECT unless explicitly US/Canada remote.
+• If location is unclear → ACCEPT
+• If remote location is unclear(e.g., "New York, NY, Remote") → ACCEPT
 • If industry is unclear → assume acceptable unless clearly in restricted list.
 
 📋 EXTRACTION (always extract regardless of status)
