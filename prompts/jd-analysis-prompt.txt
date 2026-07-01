@@ -74,6 +74,10 @@ Reject if the role is in:
 5. Relocation Requirement
 • Requires relocation (any mention of "must relocate", "relocation required", etc.).
 
+6. Posting Date Requirement
+• If posting date exists, only recent one week posted jobs ACCEPTED, older ones REJECTED
+• If posting date is not found, ACCEPTED
+
 ✅ ACCEPTABLE PREFERENCES
 Prefer and ACCEPT:
 • Remote-first roles (US or Canada).
