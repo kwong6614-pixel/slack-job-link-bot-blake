@@ -12,8 +12,12 @@ import {
   parseGreenhouseUrl,
   parseJobTitleFromPageTitle,
 } from "./greenhouse";
+import { fetchAdpJob, isAdpUrl } from "./adp";
 import { fetchAshbyJob, isAshbyUrl } from "./ashby";
+import { fetchBullhornJob, isBullhornUrl } from "./bullhorn";
 import { fetchDoverJob, fetchHtml, parseDoverJobId } from "./fetch-page";
+import { fetchHibobJob, isHibobUrl } from "./hibob";
+import { fetchUltiproJob, isUltiproUrl } from "./ultipro";
 
 export interface ScrapeResult {
   text: string;
@@ -231,6 +235,41 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
       }
     }
 
+    let partialFromApi = false;
+
+    if (!text && isAdpUrl(normalizedUrl)) {
+      const adpText = await fetchAdpJob(normalizedUrl);
+      if (adpText) {
+        text = adpText;
+        structured = true;
+      }
+    }
+
+    if (!text && isUltiproUrl(normalizedUrl)) {
+      const ultipro = await fetchUltiproJob(normalizedUrl);
+      if (ultipro) {
+        text = ultipro.text;
+        structured = true;
+        partialFromApi = ultipro.partial;
+      }
+    }
+
+    if (!text && isBullhornUrl(normalizedUrl)) {
+      const bullhornText = await fetchBullhornJob(normalizedUrl);
+      if (bullhornText) {
+        text = bullhornText;
+        structured = true;
+      }
+    }
+
+    if (!text && isHibobUrl(normalizedUrl)) {
+      const hibobText = await fetchHibobJob(normalizedUrl);
+      if (hibobText) {
+        text = hibobText;
+        structured = true;
+      }
+    }
+
     if (!text) {
       const html = await fetchHtml(normalizedUrl);
       if (!html) {
@@ -271,7 +310,7 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
 
     return {
       text,
-      partial: !structured && text.length < 800,
+      partial: partialFromApi || (!structured && text.length < 800),
       structured,
     };
   } catch (error) {
