@@ -8,6 +8,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const ANALYSIS_SCHEMA = {
   type: "object" as const,
   properties: {
+    is_job_page: {
+      type: "boolean",
+      description:
+        "True if the scraped content is a job description page. False for login pages, 404s, company homepages, blog posts, etc.",
+    },
     status: { type: "string", enum: ["ACCEPTED", "REJECTED"] },
     company_name: { type: "string" },
     role_title: { type: "string" },
@@ -21,6 +26,7 @@ const ANALYSIS_SCHEMA = {
     },
   },
   required: [
+    "is_job_page",
     "status",
     "company_name",
     "role_title",

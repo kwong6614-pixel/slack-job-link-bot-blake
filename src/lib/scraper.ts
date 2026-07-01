@@ -7,6 +7,8 @@ export interface ScrapeResult {
   text: string;
   partial: boolean;
   error?: string;
+  /** True when the page is not a job description (should be Failed, not Rejected). */
+  notJobPage?: boolean;
 }
 
 function normalizeWhitespace(text: string): string {
@@ -85,6 +87,96 @@ function detectAts(url: string): "greenhouse" | "lever" | "ashby" | "generic" {
   return "generic";
 }
 
+const JD_URL_PATTERNS = [
+  /greenhouse\.io/i,
+  /grnh\.se/i,
+  /lever\.co/i,
+  /ashbyhq\.com/i,
+  /myworkdayjobs\.com/i,
+  /icims\.com/i,
+  /smartrecruiters\.com/i,
+  /bamboohr\.com/i,
+  /jobvite\.com/i,
+  /workable\.com/i,
+  /breezy\.hr/i,
+  /recruitee\.com/i,
+  /jobs\.lever\.co/i,
+  /\/jobs?\//i,
+  /\/careers?\//i,
+  /\/postings?\//i,
+  /\/positions?\//i,
+  /careers\./i,
+  /jobs\./i,
+];
+
+const JD_CONTENT_KEYWORDS = [
+  "responsibilities",
+  "qualifications",
+  "requirements",
+  "job description",
+  "what you will do",
+  "what you'll do",
+  "what you’ll do",
+  "about the role",
+  "about this role",
+  "we are looking for",
+  "years of experience",
+  "employment type",
+  "full-time",
+  "full time",
+  "benefits",
+  "apply now",
+  "equal opportunity",
+];
+
+function looksLikeJobPage(
+  url: string,
+  text: string
+): { ok: true } | { ok: false; reason: string } {
+  const knownAts = detectAts(url) !== "generic";
+  const urlMatches = JD_URL_PATTERNS.some((pattern) => pattern.test(url));
+  const lower = text.toLowerCase();
+  const keywordHits = JD_CONTENT_KEYWORDS.filter((kw) =>
+    lower.includes(kw)
+  ).length;
+
+  if (text.length < 50) {
+    return {
+      ok: false,
+      reason: "Could not extract meaningful job description text",
+    };
+  }
+
+  if (knownAts && text.length >= 50) {
+    return { ok: true };
+  }
+
+  if (urlMatches && keywordHits >= 1 && text.length >= 150) {
+    return { ok: true };
+  }
+
+  if (keywordHits >= 2 && text.length >= 200) {
+    return { ok: true };
+  }
+
+  if (!urlMatches && keywordHits === 0) {
+    return {
+      ok: false,
+      reason: "URL and page content do not appear to be a job description",
+    };
+  }
+
+  if (text.length < 150) {
+    return {
+      ok: false,
+      reason: "Insufficient content to analyze as a job description",
+    };
+  }
+
+  // Borderline — allow OpenAI to decide via is_job_page
+  return { ok: true };
+}
+
 function extractText(html: string, url: string): string {
   const $ = cheerio.load(html);
   const ats = detectAts(url);
@@ -138,6 +230,17 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
         text: text || "",
         partial: false,
         error: "Could not extract meaningful job description text",
+        notJobPage: true,
+      };
+    }
+
+    const pageCheck = looksLikeJobPage(url, text);
+    if (!pageCheck.ok) {
+      return {
+        text,
+        partial: false,
+        error: pageCheck.reason,
+        notJobPage: true,
       };
     }
 

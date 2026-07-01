@@ -2,7 +2,6 @@ import { google, sheets_v4 } from "googleapis";
 import {
   ACCEPTED_HEADERS,
   FAILED_HEADERS,
-  REJECTED_HEADERS,
   ALL_SHEET_TABS,
   SHEET_TABS,
   type ProcessedJob,
@@ -41,7 +40,6 @@ function normalize(value: string): string {
 
 function headersForTab(tab: SheetTab): readonly string[] {
   if (tab === SHEET_TABS.FAILED) return FAILED_HEADERS;
-  if (tab === SHEET_TABS.REJECTED) return REJECTED_HEADERS;
   return ACCEPTED_HEADERS;
 }
 
@@ -59,19 +57,6 @@ function jobToAcceptedRow(job: ProcessedJob): string[] {
     job.responsibilities,
     job.qualifications_required,
     job.qualifications_preferred,
-    String(job.token_usage),
-    job.submitted_by,
-  ];
-}
-
-function jobToRejectedRow(job: ProcessedJob): string[] {
-  return [
-    formatDate(),
-    job.company_name,
-    job.role_title,
-    job.tech_stack,
-    job.url,
-    job.rejection_reason,
     String(job.token_usage),
     job.submitted_by,
   ];
@@ -181,7 +166,6 @@ async function fetchSheetIndex(
       `'${SHEET_TABS.ALL_JOBS}'!B:B`,
       `'${SHEET_TABS.ALL_JOBS}'!E:E`,
       `'${SHEET_TABS.FAILED}'!B:B`,
-      `'${SHEET_TABS.REJECTED}'!E:E`,
     ];
 
     const response = await sheets.spreadsheets.values.batchGet({
@@ -197,9 +181,8 @@ async function fetchSheetIndex(
     const allJobsCompanies = valueRanges[0]?.values?.slice(1).flat() ?? [];
     const allJobsUrls = valueRanges[1]?.values?.slice(1).flat() ?? [];
     const failedUrls = valueRanges[2]?.values?.slice(1).flat() ?? [];
-    const rejectedUrls = valueRanges[3]?.values?.slice(1).flat() ?? [];
 
-    for (const value of [...allJobsUrls, ...failedUrls, ...rejectedUrls]) {
+    for (const value of [...allJobsUrls, ...failedUrls]) {
       if (value) urls.add(normalize(String(value)));
     }
 
@@ -250,14 +233,12 @@ export async function appendJobToSheets(
   ctx: SheetContext,
   job: ProcessedJob
 ): Promise<void> {
-  if (job.status === "Failed") {
-    await appendRow(ctx, SHEET_TABS.FAILED, jobToFailedRow(job));
-    addJobToIndex(ctx.index, job);
+  if (job.status === "Rejected") {
     return;
   }
 
-  if (job.status === "Rejected") {
-    await appendRow(ctx, SHEET_TABS.REJECTED, jobToRejectedRow(job));
+  if (job.status === "Failed") {
+    await appendRow(ctx, SHEET_TABS.FAILED, jobToFailedRow(job));
     addJobToIndex(ctx.index, job);
     return;
   }

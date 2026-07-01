@@ -18,7 +18,6 @@ export const SHEET_TABS = {
   DEVOPS: "DevOps",
   EXTRA: "Extra",
   FAILED: "Failed",
-  REJECTED: "Rejected",
 } as const;
 
 export type SheetTab = (typeof SHEET_TABS)[keyof typeof SHEET_TABS];
@@ -45,18 +44,8 @@ export const FAILED_HEADERS = [
   "Submitted By",
 ] as const;
 
-export const REJECTED_HEADERS = [
-  "Date",
-  "Company",
-  "Role",
-  "Tech Stack",
-  "URL",
-  "Rejection Reason",
-  "Token Usage",
-  "Submitted By",
-] as const;
-
 export interface AnalysisResult {
+  is_job_page: boolean;
   status: "ACCEPTED" | "REJECTED";
   company_name: string;
   role_title: string;

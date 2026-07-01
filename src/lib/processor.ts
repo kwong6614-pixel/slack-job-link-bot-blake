@@ -11,16 +11,43 @@ import { ensurePromptInDatabase } from "./prompt";
 import type { ProcessedJob } from "./types";
 
 function formatSummary(job: ProcessedJob): string {
+  const reasonLabel =
+    job.status === "Failed" ? "Error" : job.status === "Rejected" ? "Reason" : null;
+
   const lines = [
     `*${job.status}* — ${job.company_name || "Unknown company"}`,
     job.role_title ? `Role: ${job.role_title}` : null,
-    job.tech_stack ? `Stack: ${job.tech_stack}` : null,
+    job.tech_stack && job.status !== "Failed" ? `Stack: ${job.tech_stack}` : null,
     job.token_usage ? `Tokens: ${job.token_usage}` : null,
-    job.rejection_reason ? `Reason: ${job.rejection_reason}` : null,
+    job.rejection_reason && reasonLabel
+      ? `${reasonLabel}: ${job.rejection_reason}`
+      : null,
     `<${job.url}|View job>`,
   ].filter(Boolean);
 
   return lines.join("\n");
+}
+
+function failedJob(
+  url: string,
+  submittedBy: string,
+  reason: string,
+  token_usage = 0
+): ProcessedJob {
+  return {
+    url,
+    status: "Failed",
+    company_name: "",
+    role_title: "",
+    tech_stack: "Extra",
+    responsibilities: "",
+    qualifications_required: "",
+    qualifications_preferred: "",
+    rejection_reason: reason,
+    token_usage,
+    submitted_by: submittedBy,
+    scrape_note: reason,
+  };
 }
 
 async function processSingleUrl(
@@ -30,21 +57,12 @@ async function processSingleUrl(
 ): Promise<ProcessedJob> {
   const scrape = await scrapeJobDescription(url);
 
-  if (!scrape.text) {
-    return {
+  if (!scrape.text || scrape.notJobPage) {
+    return failedJob(
       url,
-      status: "Failed",
-      company_name: "",
-      role_title: "",
-      tech_stack: "Extra",
-      responsibilities: "",
-      qualifications_required: "",
-      qualifications_preferred: "",
-      rejection_reason: scrape.error ?? "Scraping failed",
-      token_usage: 0,
-      submitted_by: submittedBy,
-      scrape_note: scrape.error,
-    };
+      submittedBy,
+      scrape.error ?? "Could not find job description content"
+    );
   }
 
   const urlDup = isDuplicate(sheetCtx.index, url, "");
@@ -65,6 +83,14 @@ async function processSingleUrl(
   }
 
   const { result, token_usage } = await analyzeJobDescription(url, scrape.text);
+
+  // is_job_page=false → Failed tab (not Rejected). status field is ignored.
+  if (!result.is_job_page) {
+    const reason =
+      result.rejection_reasons.join("; ") ||
+      "Page content is not a job description";
+    return failedJob(url, submittedBy, reason, token_usage);
+  }
 
   const dup = isDuplicate(sheetCtx.index, url, result.company_name);
   if (dup.duplicate) {
