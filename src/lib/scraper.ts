@@ -1,5 +1,9 @@
 import * as cheerio from "cheerio";
 import {
+  extractJobPostingFromHtml,
+  extractFromNextData,
+} from "./html-extract";
+import {
   extractMetaFromHtml,
   fetchGreenhouseJobViaApi,
   findGreenhouseJobByTitle,
@@ -9,64 +13,19 @@ import {
   parseJobTitleFromPageTitle,
 } from "./greenhouse";
 import { fetchAshbyJob, isAshbyUrl } from "./ashby";
-
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+import { fetchDoverJob, fetchHtml, parseDoverJobId } from "./fetch-page";
 
 export interface ScrapeResult {
   text: string;
   partial: boolean;
   error?: string;
-  /** True when the page is not a job description (should be Failed, not Rejected). */
   notJobPage?: boolean;
+  /** True when text came from JSON-LD or API (high confidence). */
+  structured?: boolean;
 }
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-function extractFromGreenhouse($: cheerio.CheerioAPI): string {
-  const selectors = [
-    "#content",
-    ".job-post",
-    ".job__description",
-    "[data-qa='job-description']",
-    ".job__body",
-    ".job-post-content",
-  ];
-  for (const selector of selectors) {
-    const text = normalizeWhitespace($(selector).text());
-    if (text.length > 200) return text;
-  }
-  return "";
-}
-
-function extractFromLever($: cheerio.CheerioAPI): string {
-  const selectors = [
-    ".content",
-    ".posting-page",
-    ".section-wrapper",
-    ".posting-categories",
-  ];
-  for (const selector of selectors) {
-    const text = normalizeWhitespace($(selector).text());
-    if (text.length > 200) return text;
-  }
-  return "";
-}
-
-function extractFromAshby($: cheerio.CheerioAPI): string {
-  const selectors = [
-    "[class*='JobDescription']",
-    "[class*='jobDescription']",
-    "main",
-    "article",
-  ];
-  for (const selector of selectors) {
-    const text = normalizeWhitespace($(selector).text());
-    if (text.length > 200) return text;
-  }
-  return "";
 }
 
 function extractGeneric($: cheerio.CheerioAPI): string {
@@ -75,7 +34,9 @@ function extractGeneric($: cheerio.CheerioAPI): string {
   const selectors = [
     "[class*='job-description']",
     "[class*='jobDescription']",
+    "[class*='JobDescription']",
     "[id*='job-description']",
+    "[data-testid*='job']",
     "main",
     "article",
     "[role='main']",
@@ -89,16 +50,6 @@ function extractGeneric($: cheerio.CheerioAPI): string {
   return normalizeWhitespace($("body").text());
 }
 
-function detectAts(url: string): "greenhouse" | "lever" | "ashby" | "generic" {
-  const lower = url.toLowerCase();
-  if (lower.includes("greenhouse.io") || lower.includes("grnh.se")) {
-    return "greenhouse";
-  }
-  if (lower.includes("lever.co")) return "lever";
-  if (lower.includes("ashbyhq.com")) return "ashby";
-  return "generic";
-}
-
 const JD_URL_PATTERNS = [
   /greenhouse\.io/i,
   /grnh\.se/i,
@@ -110,13 +61,18 @@ const JD_URL_PATTERNS = [
   /bamboohr\.com/i,
   /jobvite\.com/i,
   /workable\.com/i,
-  /breezy\.hr/i,
-  /recruitee\.com/i,
-  /jobs\.lever\.co/i,
+  /dice\.com/i,
+  /dover\.com/i,
+  /clearcompany\.com/i,
+  /jobdiva\.com/i,
+  /gem\.com/i,
+  /bairesdev\.com/i,
   /\/jobs?\//i,
+  /\/job-detail\//i,
   /\/careers?\//i,
   /\/postings?\//i,
   /\/positions?\//i,
+  /\/apply\//i,
   /careers\./i,
   /jobs\./i,
 ];
@@ -127,7 +83,6 @@ const JD_CONTENT_KEYWORDS = [
   "requirements",
   "job description",
   "what you will do",
-  "what you'll do",
   "what you'll do",
   "about the role",
   "about this role",
@@ -143,9 +98,13 @@ const JD_CONTENT_KEYWORDS = [
 
 function looksLikeJobPage(
   url: string,
-  text: string
+  text: string,
+  structured: boolean
 ): { ok: true } | { ok: false; reason: string } {
-  const knownAts = detectAts(url) !== "generic";
+  if (structured && text.length >= 50) {
+    return { ok: true };
+  }
+
   const urlMatches = JD_URL_PATTERNS.some((pattern) => pattern.test(url));
   const lower = text.toLowerCase();
   const keywordHits = JD_CONTENT_KEYWORDS.filter((kw) =>
@@ -159,15 +118,15 @@ function looksLikeJobPage(
     };
   }
 
-  if (knownAts && text.length >= 50) {
+  if (urlMatches && keywordHits >= 1 && text.length >= 100) {
     return { ok: true };
   }
 
-  if (urlMatches && keywordHits >= 1 && text.length >= 150) {
+  if (keywordHits >= 2 && text.length >= 150) {
     return { ok: true };
   }
 
-  if (keywordHits >= 2 && text.length >= 200) {
+  if (text.startsWith("Job Title:") && text.length >= 200) {
     return { ok: true };
   }
 
@@ -178,7 +137,7 @@ function looksLikeJobPage(
     };
   }
 
-  if (text.length < 150) {
+  if (text.length < 120) {
     return {
       ok: false,
       reason: "Insufficient content to analyze as a job description",
@@ -189,27 +148,14 @@ function looksLikeJobPage(
 }
 
 function extractTextFromHtml(html: string, url: string): string {
+  const structured = extractJobPostingFromHtml(html);
+  if (structured) return structured.text;
+
+  const nextData = extractFromNextData(html);
+  if (nextData) return nextData;
+
   const $ = cheerio.load(html);
-  const ats = detectAts(url);
-
-  let text = "";
-  switch (ats) {
-    case "greenhouse":
-      text = extractFromGreenhouse($);
-      break;
-    case "lever":
-      text = extractFromLever($);
-      break;
-    case "ashby":
-      text = extractFromAshby($);
-      break;
-    default:
-      break;
-  }
-
-  if (text.length < 200) {
-    text = extractGeneric(cheerio.load(html));
-  }
+  let text = extractGeneric($);
 
   const meta = extractMetaFromHtml(html);
   if (meta && text.length < 800) {
@@ -219,29 +165,25 @@ function extractTextFromHtml(html: string, url: string): string {
   return text.slice(0, 30000);
 }
 
-async function scrapeGreenhouse(url: string): Promise<string | null> {
+async function scrapeGreenhouse(url: string): Promise<{
+  text: string | null;
+  structured: boolean;
+}> {
   const normalizedUrl = normalizeIncomingUrl(url);
   const ids = parseGreenhouseUrl(normalizedUrl);
   if (ids) {
     const apiText = await fetchGreenhouseJobViaApi(ids.board, ids.jobId);
-    if (apiText) return apiText;
+    if (apiText) return { text: apiText, structured: true };
   }
 
-  const response = await fetch(normalizedUrl, {
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml",
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(25000),
-  });
+  const html = await fetchHtml(normalizedUrl);
+  if (!html) return { text: null, structured: false };
 
-  if (!response.ok) return null;
+  const structured = extractJobPostingFromHtml(html);
+  if (structured) return { text: structured.text, structured: true };
 
-  const html = await response.text();
   const pageTitle =
     cheerio.load(html)("title").text() || extractMetaFromHtml(html);
-
   const jobTitle = parseJobTitleFromPageTitle(pageTitle);
   const board =
     parseGreenhouseUrl(normalizedUrl)?.board ||
@@ -252,54 +194,60 @@ async function scrapeGreenhouse(url: string): Promise<string | null> {
     const match = await findGreenhouseJobByTitle(board, jobTitle);
     if (match) {
       const apiText = await fetchGreenhouseJobViaApi(match.board, match.jobId);
-      if (apiText) return apiText;
+      if (apiText) return { text: apiText, structured: true };
     }
   }
 
-  return extractTextFromHtml(html, url);
-}
-
-async function fetchPageText(url: string): Promise<{ html: string; text: string } | null> {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml",
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(25000),
-  });
-
-  if (!response.ok) return null;
-
-  const html = await response.text();
-  return { html, text: extractTextFromHtml(html, url) };
+  return { text: extractTextFromHtml(html, url), structured: false };
 }
 
 export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
   try {
     const normalizedUrl = normalizeIncomingUrl(url);
     let text = "";
+    let structured = false;
 
     if (isGreenhouseUrl(normalizedUrl)) {
-      const greenhouseText = await scrapeGreenhouse(normalizedUrl);
-      if (greenhouseText) text = greenhouseText;
+      const gh = await scrapeGreenhouse(normalizedUrl);
+      if (gh.text) {
+        text = gh.text;
+        structured = gh.structured;
+      }
+    }
+
+    if (!text && parseDoverJobId(normalizedUrl)) {
+      const doverText = await fetchDoverJob(normalizedUrl);
+      if (doverText) {
+        text = doverText;
+        structured = true;
+      }
     }
 
     if (!text && isAshbyUrl(normalizedUrl)) {
       const ashbyText = await fetchAshbyJob(normalizedUrl);
-      if (ashbyText) text = ashbyText;
+      if (ashbyText) {
+        text = ashbyText;
+        structured = true;
+      }
     }
 
     if (!text) {
-      const page = await fetchPageText(normalizedUrl);
-      if (!page) {
+      const html = await fetchHtml(normalizedUrl);
+      if (!html) {
         return {
           text: "",
           partial: false,
           error: "Failed to fetch page",
         };
       }
-      text = page.text;
+
+      const ld = extractJobPostingFromHtml(html);
+      if (ld) {
+        text = ld.text;
+        structured = true;
+      } else {
+        text = extractTextFromHtml(html, normalizedUrl);
+      }
     }
 
     if (!text || text.length < 50) {
@@ -311,7 +259,7 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
       };
     }
 
-    const pageCheck = looksLikeJobPage(normalizedUrl, text);
+    const pageCheck = looksLikeJobPage(normalizedUrl, text, structured);
     if (!pageCheck.ok) {
       return {
         text,
@@ -323,7 +271,8 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
 
     return {
       text,
-      partial: text.length < 800,
+      partial: !structured && text.length < 800,
+      structured,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown scrape error";

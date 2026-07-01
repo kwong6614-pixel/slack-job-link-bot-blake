@@ -96,8 +96,8 @@ async function processSingleUrl(
 
   const { result, token_usage } = await analyzeJobDescription(url, scrape.text);
 
-  // is_job_page=false → Failed tab (not Rejected). status field is ignored.
-  if (!result.is_job_page) {
+  // Trust structured scrapes (JSON-LD / ATS APIs) over is_job_page=false.
+  if (!result.is_job_page && !scrape.structured) {
     const reason =
       result.rejection_reasons.join("; ") ||
       "Page content is not a job description";
