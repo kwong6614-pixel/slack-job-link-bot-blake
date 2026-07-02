@@ -54,3 +54,11 @@ export function normalizeCompanyName(value: string): string {
 
   return name.replace(/\s+/g, " ").trim();
 }
+
+/** Canonical company name for sheets and dedup (suffixes stripped, title-cased). */
+export function normalizeCompanyNameForSheet(value: string): string {
+  const key = normalizeCompanyName(value);
+  if (!key) return "";
+
+  return key.replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}

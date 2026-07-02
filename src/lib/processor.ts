@@ -1,4 +1,5 @@
 import { analyzeJobDescription } from "./openai-analyzer";
+import { normalizeCompanyNameForSheet } from "./company-normalize";
 import { scrapeJobDescription } from "./scraper";
 import {
   appendJobToSheets,
@@ -95,6 +96,7 @@ async function processSingleUrl(
   }
 
   const { result, token_usage } = await analyzeJobDescription(url, scrape.text);
+  const companyName = normalizeCompanyNameForSheet(result.company_name);
 
   // Trust structured scrapes (JSON-LD / ATS APIs) over is_job_page=false.
   if (!result.is_job_page && !scrape.structured) {
@@ -104,7 +106,7 @@ async function processSingleUrl(
     return failedJob(url, submittedBy, reason, token_usage);
   }
 
-  const companyDup = isDuplicateCompany(sheetCtx.index, result.company_name);
+  const companyDup = isDuplicateCompany(sheetCtx.index, companyName);
   if (companyDup.duplicate) {
     return rejectedJob(
       url,
@@ -112,7 +114,7 @@ async function processSingleUrl(
       companyDup.reason ?? "Duplicate",
       token_usage,
       {
-        company_name: result.company_name,
+        company_name: companyName,
         role_title: result.role_title,
         tech_stack: result.tech_stack,
         responsibilities: result.responsibilities,
@@ -130,7 +132,7 @@ async function processSingleUrl(
       result.rejection_reasons.join("; ") || "Rejected by analysis rules",
       token_usage,
       {
-        company_name: result.company_name,
+        company_name: companyName,
         role_title: result.role_title,
         tech_stack: result.tech_stack,
         responsibilities: result.responsibilities,
@@ -144,7 +146,7 @@ async function processSingleUrl(
   return {
     url,
     status: "Accepted",
-    company_name: result.company_name,
+    company_name: companyName,
     role_title: result.role_title,
     tech_stack: result.tech_stack,
     responsibilities: result.responsibilities,
