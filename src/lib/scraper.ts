@@ -22,6 +22,11 @@ import { fetchGustoJob, isGustoUrl } from "./gusto";
 import { fetchHibobJob, isHibobUrl } from "./hibob";
 import { fetchIcimsJob, isIcimsUrl } from "./icims";
 import { fetchJobdivaJob, isJobdivaUrl } from "./jobdiva";
+import {
+  fetchSmartRecruitersJob,
+  isSmartRecruitersUrl,
+  parseSmartRecruitersUrl,
+} from "./smartrecruiters";
 import { fetchUltiproJob, isUltiproUrl } from "./ultipro";
 
 export interface ScrapeResult {
@@ -305,6 +310,21 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
       if (gustoText) {
         text = gustoText;
         structured = true;
+      }
+    }
+
+    if (!text && isSmartRecruitersUrl(normalizedUrl)) {
+      const srText = await fetchSmartRecruitersJob(normalizedUrl);
+      if (srText) {
+        text = srText;
+        structured = true;
+      } else if (parseSmartRecruitersUrl(normalizedUrl)) {
+        return {
+          text: "",
+          partial: false,
+          error:
+            "Could not fetch SmartRecruiters job posting (apply URL — full JD fetched via API when available)",
+        };
       }
     }
 
