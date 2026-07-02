@@ -18,6 +18,7 @@ import { fetchBairesdevJob, isBairesdevUrl } from "./bairesdev";
 import { fetchBullhornJob, isBullhornUrl } from "./bullhorn";
 import { fetchDoverJob, fetchHtml, parseDoverJobId } from "./fetch-page";
 import { fetchGemJob, isGemUrl } from "./gem";
+import { fetchGustoJob, isGustoUrl } from "./gusto";
 import { fetchHibobJob, isHibobUrl } from "./hibob";
 import { fetchIcimsJob, isIcimsUrl } from "./icims";
 import { fetchJobdivaJob, isJobdivaUrl } from "./jobdiva";
@@ -71,6 +72,7 @@ const JD_URL_PATTERNS = [
   /workable\.com/i,
   /dice\.com/i,
   /dover\.com/i,
+  /gusto\.com/i,
   /clearcompany\.com/i,
   /jobdiva\.com/i,
   /gem\.com/i,
@@ -294,6 +296,14 @@ export async function scrapeJobDescription(url: string): Promise<ScrapeResult> {
       const bairesdevText = await fetchBairesdevJob(normalizedUrl);
       if (bairesdevText) {
         text = bairesdevText;
+        structured = true;
+      }
+    }
+
+    if (!text && isGustoUrl(normalizedUrl)) {
+      const gustoText = await fetchGustoJob(normalizedUrl);
+      if (gustoText) {
+        text = gustoText;
         structured = true;
       }
     }

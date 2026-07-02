@@ -42,6 +42,9 @@ export function prepareFetchUrl(url: string): string {
       parsed.pathname.includes("/jobs/")
     ) {
       parsed.searchParams.set("in_iframe", "1");
+      if (parsed.pathname.endsWith("/job")) {
+        parsed.searchParams.set("mode", "job");
+      }
     }
 
     return parsed.toString();
@@ -113,44 +116,49 @@ export async function fetchDoverJob(url: string): Promise<string | null> {
   const jobId = parseDoverJobId(url);
   if (!jobId) return null;
 
-  const endpoints = [
-    `https://app.dover.com/api/v1/careers/${jobId}`,
-    `https://app.dover.com/api/v1/public/job_postings/${jobId}`,
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, {
+  try {
+    const response = await fetch(
+      `https://app.dover.com/api/v1/inbound/application-portal-job/${jobId}`,
+      {
         headers: {
-          ...FETCH_HEADERS,
           Accept: "application/json",
+          "X-DOVER-ORIGIN": "DOVER_PRO",
         },
         signal: AbortSignal.timeout(20_000),
-      });
+      }
+    );
 
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!response.ok || !contentType.includes("json")) continue;
+    if (!response.ok) return null;
 
-      const data = (await response.json()) as Record<string, unknown>;
-      const title = String(data.title || data.name || "");
-      const description = String(
-        data.description || data.job_description || data.content || ""
-      );
-      const plain = stripHtml(description);
-      if (plain.length < 50) continue;
+    const data = (await response.json()) as Record<string, unknown>;
+    const title = String(data.title || "");
+    const description = String(data.user_provided_description || "");
+    const plain = stripHtml(description);
+    if (plain.length < 50) return null;
 
-      return [
-        title ? `Job Title: ${title}` : "",
-        data.company_name ? `Company: ${String(data.company_name)}` : "",
-        "",
-        plain,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    } catch {
-      continue;
-    }
+    const location = String(data.location || "");
+    const workplace = String(data.workplace_type || "");
+    const compensation = data.compensation as
+      | { min?: number; max?: number; currency?: string }
+      | undefined;
+
+    const salary =
+      compensation?.min && compensation?.max
+        ? `${compensation.min}-${compensation.max}${compensation.currency ? ` ${compensation.currency}` : ""}`
+        : "";
+
+    return [
+      title ? `Job Title: ${title}` : "",
+      data.client_name ? `Company: ${String(data.client_name)}` : "",
+      location ? `Location: ${location}` : "",
+      workplace ? `Workplace: ${workplace}` : "",
+      salary ? `Compensation: ${salary}` : "",
+      "",
+      plain,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return null;
   }
-
-  return null;
 }

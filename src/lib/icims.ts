@@ -12,25 +12,33 @@ export function isIcimsUrl(url: string): boolean {
   }
 }
 
+const STRIP_QUERY_PARAMS = new Set([
+  "jr_id",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+  "mobile",
+  "width",
+  "height",
+  "bga",
+  "needsRedirect",
+  "jan1offset",
+  "jun1offset",
+]);
+
 export function parseIcimsJobUrl(url: string): string | null {
   try {
     const parsed = new URL(normalizeIncomingUrl(url));
     if (!parsed.pathname.includes("/jobs/")) return null;
 
-    parsed.searchParams.set("in_iframe", "1");
-    parsed.searchParams.set("mode", "job");
-
-    for (const param of [
-      "mobile",
-      "width",
-      "height",
-      "bga",
-      "needsRedirect",
-      "jan1offset",
-      "jun1offset",
-    ]) {
+    for (const param of STRIP_QUERY_PARAMS) {
       parsed.searchParams.delete(param);
     }
+
+    parsed.searchParams.set("in_iframe", "1");
+    parsed.searchParams.set("mode", "job");
 
     return parsed.toString();
   } catch {
@@ -43,9 +51,16 @@ async function fetchIcimsHtml(fetchUrl: string): Promise<string | null> {
     ...FETCH_HEADERS,
     Referer: "https://www.icims.com/",
     "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "iframe",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
   };
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+    }
+
     try {
       const response = await fetch(fetchUrl, {
         headers,
@@ -56,10 +71,7 @@ async function fetchIcimsHtml(fetchUrl: string): Promise<string | null> {
       if (!response.ok) continue;
 
       const html = await response.text();
-      if (
-        html.includes("Human Verification") ||
-        html.includes("captcha-container")
-      ) {
+      if (html.includes("Human Verification")) {
         continue;
       }
 
