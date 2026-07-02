@@ -11,6 +11,7 @@ import {
   type TechStack,
 } from "./types";
 import { withSheetsRetry } from "./sheets-retry";
+import { normalizeCompanyName } from "./company-normalize";
 
 function getAuthClient() {
   const oauth2Client = new google.auth.OAuth2(
@@ -36,7 +37,7 @@ function getSheetsClient(): sheets_v4.Sheets {
 }
 
 function normalizeCompany(value: string): string {
-  return value.trim().toLowerCase();
+  return normalizeCompanyName(value);
 }
 
 function normalizeUrl(url: string): string {
