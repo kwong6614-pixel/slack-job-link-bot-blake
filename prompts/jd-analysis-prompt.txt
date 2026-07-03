@@ -57,7 +57,7 @@ Reject the job if ANY of the following are true:
 • Outside United States or Canada.
 • "Remote in specific city/state" (e.g., "remote in Austin, TX").
 • Country-restricted remote roles (e.g., "remote in UK only").
-• Any geo-locking that is not US/Canada flexible remote.
+• Any geo-locking that is not US or Canada flexible remote.
 
 4. Industry Restrictions (STRICT REJECTION)
 Reject if the role is in:
@@ -78,6 +78,9 @@ Reject if the role is in:
 • If posting date exists, only recent one week posted jobs ACCEPTED, older ones REJECTED
 • If posting date is not found, ACCEPTED
 
+7. Role Requirement
+• If role is Junior/Lead/Principal/Manager, REJECTED
+
 ✅ ACCEPTABLE PREFERENCES
 Prefer and ACCEPT:
 • Remote-first roles (US or Canada).
@@ -86,7 +89,7 @@ Prefer and ACCEPT:
 
 ⚠️ EDGE CASE RULES
 • If ambiguity exists → assume ACCEPTED.
-• If hybrid + remote wording both appear → treat as hybrid → ACCEPTED.
+• If hybrid + remote wording both appear → treat as remote → ACCEPTED.
 • If "occasional office visit" exists → treat as remote → ACCEPTED.
 • If location is unclear → ACCEPTED
 • If remote location is unclear (e.g., "New York, NY, Remote") → ACCEPTED
