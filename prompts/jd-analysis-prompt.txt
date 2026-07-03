@@ -56,7 +56,7 @@ Reject the job if ANY of the following are true:
 3. Location Restrictions
 • Outside United States or Canada.
 • "Remote in specific city/state" (e.g., "remote in Austin, TX").
-• Country-restricted remote roles (e.g., "remote in UK only").
+• Non US/Canada Country-restricted remote roles (e.g., "remote in UK only").
 • Any geo-locking that is not US or Canada flexible remote.
 
 4. Industry Restrictions (STRICT REJECTION)
