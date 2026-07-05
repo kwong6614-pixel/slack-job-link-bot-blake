@@ -30,6 +30,22 @@ function formatSummary(job: ProcessedJob): string {
   return lines.join("\n");
 }
 
+function formatCompletionMessage(jobs: ProcessedJob[]): string {
+  const accepted = jobs.filter((j) => j.status === "Accepted").length;
+  const rejected = jobs.filter((j) => j.status === "Rejected").length;
+  const failed = jobs.filter((j) => j.status === "Failed").length;
+  const total = jobs.length;
+
+  const parts = [
+    accepted > 0 ? `${accepted} accepted` : null,
+    rejected > 0 ? `${rejected} rejected` : null,
+    failed > 0 ? `${failed} failed` : null,
+  ].filter(Boolean);
+
+  const summary = parts.length > 0 ? parts.join(", ") : "no results";
+  return `*Completed* — processed ${total} URL${total === 1 ? "" : "s"}: ${summary}`;
+}
+
 function rejectedJob(
   url: string,
   submittedBy: string,
@@ -182,11 +198,13 @@ export async function processUrlsFromMessage(
   );
 
   const sheetCtx = await createSheetContext();
+  const results: ProcessedJob[] = [];
 
   for (const url of urls) {
     try {
       const job = await processSingleUrl(url, submittedBy, sheetCtx);
       await appendJobToSheets(sheetCtx, job);
+      results.push(job);
       await postMessage(channel, formatSummary(job));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -204,7 +222,10 @@ export async function processUrlsFromMessage(
         submitted_by: submittedBy,
       };
       await appendJobToSheets(sheetCtx, failedJob);
+      results.push(failedJob);
       await postMessage(channel, `*Failed* — <${url}|${url}>\nError: ${message}`);
     }
   }
+
+  await postMessage(channel, formatCompletionMessage(results));
 }
