@@ -48,32 +48,49 @@ export async function analyzeJobDescription(
   url: string,
   jdText: string
 ): Promise<AnalyzeResponse> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
   const systemPrompt = await getAnalysisPrompt();
   const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
 
-  const response = await openai.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: `Analyze this job posting.
+  let response;
+  try {
+    response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Analyze this job posting.
 
 URL: ${url}
 
 Job Description:
 ${jdText}`,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "jd_analysis",
+          strict: true,
+          schema: ANALYSIS_SCHEMA,
+        },
       },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "jd_analysis",
-        strict: true,
-        schema: ANALYSIS_SCHEMA,
-      },
-    },
-  });
+    });
+  } catch (error) {
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? (error as { status?: number }).status
+        : undefined;
+    if (status === 401) {
+      throw new Error("OpenAI API key is invalid or expired (401)");
+    }
+    throw error;
+  }
 
   const content = response.choices[0]?.message?.content;
   if (!content) {

@@ -6,10 +6,13 @@ import {
   createSheetContext,
   isDuplicateCompany,
   isDuplicateUrl,
+  verifyGoogleSheetsAuth,
   type SheetContext,
 } from "./sheets";
 import { postMessage, getUserDisplayName } from "./slack";
 import { ensurePromptInDatabase } from "./prompt";
+import { formatProcessingError } from "./processing-errors";
+import { alertOnCredentialFailure } from "./credential-alerts";
 import type { ProcessedJob } from "./types";
 
 function formatSummary(job: ProcessedJob): string {
@@ -180,52 +183,61 @@ export async function processUrlsFromMessage(
   channel: string,
   userId: string
 ): Promise<void> {
-  await ensurePromptInDatabase();
+  try {
+    await ensurePromptInDatabase();
 
-  const submittedBy = await getUserDisplayName(userId);
+    const submittedBy = await getUserDisplayName(userId);
 
-  if (urls.length === 0) {
+    if (urls.length === 0) {
+      await postMessage(
+        channel,
+        "Send me one or more job URLs (Greenhouse, Lever, Ashby, etc.) and I'll analyze them."
+      );
+      return;
+    }
+
     await postMessage(
       channel,
-      "Send me one or more job URLs (Greenhouse, Lever, Ashby, etc.) and I'll analyze them."
+      `Analyzing ${urls.length} URL${urls.length > 1 ? "s" : ""}…`
     );
-    return;
-  }
 
-  await postMessage(
-    channel,
-    `Analyzing ${urls.length} URL${urls.length > 1 ? "s" : ""}…`
-  );
+    await verifyGoogleSheetsAuth();
+    const sheetCtx = await createSheetContext();
+    const results: ProcessedJob[] = [];
 
-  const sheetCtx = await createSheetContext();
-  const results: ProcessedJob[] = [];
-
-  for (const url of urls) {
-    try {
-      const job = await processSingleUrl(url, submittedBy, sheetCtx);
-      await appendJobToSheets(sheetCtx, job);
-      results.push(job);
-      await postMessage(channel, formatSummary(job));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      const failedJob: ProcessedJob = {
-        url,
-        status: "Failed",
-        company_name: "",
-        role_title: "",
-        tech_stack: "Extra",
-        responsibilities: "",
-        qualifications_required: "",
-        qualifications_preferred: "",
-        rejection_reason: message,
-        token_usage: 0,
-        submitted_by: submittedBy,
-      };
-      await appendJobToSheets(sheetCtx, failedJob);
-      results.push(failedJob);
-      await postMessage(channel, `*Failed* — <${url}|${url}>\nError: ${message}`);
+    for (const url of urls) {
+      try {
+        const job = await processSingleUrl(url, submittedBy, sheetCtx);
+        await appendJobToSheets(sheetCtx, job);
+        results.push(job);
+        await postMessage(channel, formatSummary(job));
+      } catch (error) {
+        await alertOnCredentialFailure(error, { channel, userId, url });
+        const message = error instanceof Error ? error.message : "Unknown error";
+        const failedJob: ProcessedJob = {
+          url,
+          status: "Failed",
+          company_name: "",
+          role_title: "",
+          tech_stack: "Extra",
+          responsibilities: "",
+          qualifications_required: "",
+          qualifications_preferred: "",
+          rejection_reason: message,
+          token_usage: 0,
+          submitted_by: submittedBy,
+        };
+        await appendJobToSheets(sheetCtx, failedJob);
+        results.push(failedJob);
+        await postMessage(channel, `*Failed* — <${url}|${url}>\nError: ${message}`);
+      }
     }
-  }
 
-  await postMessage(channel, formatCompletionMessage(results));
+    await postMessage(channel, formatCompletionMessage(results));
+  } catch (error) {
+    await alertOnCredentialFailure(error, { channel, userId });
+    const message = formatProcessingError(error);
+    console.error("Job batch processing failed:", error);
+    await postMessage(channel, `*Failed* — ${message}`);
+  }
 }

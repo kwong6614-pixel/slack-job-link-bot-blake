@@ -1,7 +1,9 @@
 import { after } from "next/server";
 import { extractUrls } from "@/lib/scraper";
 import { processUrlsFromMessage } from "@/lib/processor";
-import { verifySlackSignature } from "@/lib/slack";
+import { verifySlackSignature, postMessage } from "@/lib/slack";
+import { formatProcessingError } from "@/lib/processing-errors";
+import { alertOnCredentialFailure } from "@/lib/credential-alerts";
 
 export const maxDuration = 300;
 
@@ -55,7 +57,20 @@ export async function POST(request: Request) {
       const userId = event.user;
 
       after(async () => {
-        await processUrlsFromMessage(urls, channel, userId);
+        try {
+          await processUrlsFromMessage(urls, channel, userId);
+        } catch (error) {
+          console.error("Unhandled error in after():", error);
+          await alertOnCredentialFailure(error, { channel, userId });
+          try {
+            await postMessage(
+              channel,
+              `*Failed* — ${formatProcessingError(error)}`
+            );
+          } catch (notifyError) {
+            console.error("Could not notify Slack about failure:", notifyError);
+          }
+        }
       });
     }
   }

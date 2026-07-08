@@ -14,16 +14,32 @@ import { withSheetsRetry } from "./sheets-retry";
 import { normalizeCompanyName } from "./company-normalize";
 
 function getAuthClient() {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN?.trim();
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      "Missing Google OAuth env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN are required"
+    );
+  }
+
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
 
   oauth2Client.setCredentials({
-    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+    refresh_token: refreshToken,
   });
 
   return oauth2Client;
+}
+
+/** Verify Google OAuth refresh token can obtain an access token. */
+export async function verifyGoogleSheetsAuth(): Promise<void> {
+  const auth = getAuthClient();
+  const token = await auth.getAccessToken();
+  if (!token.token) {
+    throw new Error("Google OAuth returned an empty access token");
+  }
 }
 
 function getSpreadsheetId(): string {
