@@ -60,7 +60,7 @@ Reject the job if ANY of the following are true:
 • Any geo-locking that is not US or Canada flexible remote.
 
 4. Industry Restrictions (STRICT REJECTION)
-Reject if the role is in:
+Reject if the company industry is in:
 • Healthcare (including health tech if core domain is healthcare delivery).
 • Finance.
 • Fintech.
