@@ -108,10 +108,12 @@ Always extract (best-effort when is_job_page is false):
   • QA: QA, test, SDET roles
   • DevOps: DevOps, SRE, cloud, platform engineering roles
   • Extra: anything else (PM, design, unrelated, etc.)
+- rejection_reasons: 1-3 bullet reasons if status is REJECTED (and is_job_page is true), empty array otherwise
+
+Extract belows only when ACCEPTED:
 - responsibilities: bullet summary of key responsibilities
 - qualifications_required: required qualifications
 - qualifications_preferred: preferred/nice-to-have qualifications
-- rejection_reasons: 1-3 bullet reasons if status is REJECTED (and is_job_page is true), empty array otherwise
 
 🎯 GOAL
 Be extremely consistent and strict on filter rules. Do not "interpret generously." Filter aggressively for remote US/Canada-friendly software opportunities only.
