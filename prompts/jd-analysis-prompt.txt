@@ -68,7 +68,7 @@ Reject if the company industry is in:
 • Insurance.
 • Aerospace.
 • Cyber Security
-• Government / Public sector.
+• Government
 • Defense / Military / Security clearance work.
 
 Exception:
