@@ -71,6 +71,11 @@ Reject if the company industry is in:
 • Government / Public sector.
 • Defense / Military / Security clearance work.
 
+Exception:
+If the company operates in one of the above industries but the specific role is clearly focused on general commercial software development, internal business systems, SaaS products, developer tools, infrastructure, or other non-sensitive work, and there is no indication of strict background checks, security clearance, regulated access, or sensitive data handling beyond normal employment requirements, **accept the role**.
+
+When uncertain, evaluate the actual job responsibilities and required security level rather than rejecting solely based on the company's industry.
+
 5. Relocation Requirement
 • Requires relocation (any mention of "must relocate", "relocation required", etc.).
 
